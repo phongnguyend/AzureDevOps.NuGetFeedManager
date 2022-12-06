@@ -43,7 +43,7 @@ namespace AzureDevOps.NuGetFeedManager
                 package.VersionMetrics = JsonSerializer.Deserialize<PackageVersionMetricsResponse>(responseBody, jsonOptions).Value;
 
                 var deletedPackageVersions = package.Versions.Where(x => !x.IsLatest && !x.IsDeleted && x.IsListed && !package.VersionMetrics.Any(y => y.PackageVersionId == x.Id)).ToArray();
-                deletedPackageVersions = deletedPackageVersions.Where(x => x.PublishDate <= DateTime.Now.AddDays(14)).ToArray();
+                deletedPackageVersions = deletedPackageVersions.Where(x => x.PublishDate <= DateTime.Now.AddDays(-14)).ToArray();
 
                 Console.WriteLine($"Package: {package.Name} - {package.Versions.Count} packages - Needs to delete: {deletedPackageVersions.Length} packages");
 
