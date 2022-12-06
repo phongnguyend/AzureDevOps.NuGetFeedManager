@@ -1,0 +1,2 @@
+- [NuGet - REST API (Azure DevOps Artifacts Package Types) | Microsoft Learn](https://learn.microsoft.com/en-us/rest/api/azure/devops/artifactspackagetypes/nuget?view=azure-devops-rest-7.0)
+- [Artifact Details - Query Package Version Metrics - REST API (Azure DevOps Artifacts) | Microsoft Learn](https://learn.microsoft.com/en-us/rest/api/azure/devops/artifacts/artifact-details/query-package-version-metrics?view=azure-devops-rest-7.0)
