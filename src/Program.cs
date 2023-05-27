@@ -2,52 +2,71 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 
-namespace AzureDevOps.NuGetFeedManager
+namespace AzureDevOps.NuGetFeedManager;
+
+public class Program
 {
-    public class Program
+    private async static Task Main(string[] args)
     {
-        private async static Task Main(string[] args)
+        var feedInfo = new FeedInfo
         {
-            var feedInfo = new FeedInfo
+            Organization = "xxx",
+            Project = "xxx",
+            FeedId = "xxx",
+            PersonalAccessToken = "xxx"
+        };
+
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", feedInfo.ApiAccessToken);
+
+        var jsonOptions = new JsonSerializerOptions()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        HttpResponseMessage response = await client.GetAsync(feedInfo.FeedUrl + "/packages?api-version=7.0");
+        response.EnsureSuccessStatusCode();
+        string responseBody = await response.Content.ReadAsStringAsync();
+
+        var packages = JsonSerializer.Deserialize<PackagesResponse>(responseBody, jsonOptions).Value;
+
+        foreach (var package in packages)
+        {
+            responseBody = await (await client.GetAsync(package.Url + "/versions?api-version=7.0&isDeleted=false")).Content.ReadAsStringAsync();
+            package.Versions = JsonSerializer.Deserialize<PackageVersionsResponse>(responseBody, jsonOptions).Value;
+
+            responseBody = await (await client.PostAsJsonAsync(package.Url + "/versionmetricsbatch?api-version=7.0", new
             {
-                Organization = "xxx",
-                Project = "xxx",
-                FeedId = "xxx",
-                PersonalAccessToken = "xxx"
-            };
+                PackageVersionIds = package.Versions.Where(x => x.IsListed).Select(x => x.Id).ToArray()
+            })).Content.ReadAsStringAsync();
+            package.VersionMetrics = JsonSerializer.Deserialize<PackageVersionMetricsResponse>(responseBody, jsonOptions).Value;
 
-            HttpClient client = new HttpClient();
-            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", feedInfo.ApiAccessToken);
+            var deletedPackageVersions = package.Versions.Where(x => !x.IsLatest && !x.IsDeleted && x.IsListed && !package.VersionMetrics.Any(y => y.PackageVersionId == x.Id)).ToArray();
+            deletedPackageVersions = deletedPackageVersions.Where(x => x.PublishDate <= DateTime.Now.AddDays(-14)).ToArray();
 
-            var jsonOptions = new JsonSerializerOptions()
+            Console.WriteLine($"Package: {package.Name} - {package.Versions.Count} packages - Needs to delete: {deletedPackageVersions.Length} packages");
+
+            foreach (var deletedPackageVersion in deletedPackageVersions)
             {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
+                var packageUrl = feedInfo.NuGetUrl + $"/packages/{package.Name}/versions/{deletedPackageVersion.Version}?api-version=7.0";
 
-            HttpResponseMessage response = await client.GetAsync(feedInfo.FeedUrl + "/packages?api-version=7.0");
-            response.EnsureSuccessStatusCode();
-            string responseBody = await response.Content.ReadAsStringAsync();
+                responseBody = await (await client.DeleteAsync(packageUrl)).Content.ReadAsStringAsync();
 
-            var packages = JsonSerializer.Deserialize<PackagesResponse>(responseBody, jsonOptions).Value;
+                Console.WriteLine($"Package: {package.Name} - Deleted: {deletedPackageVersion.Version}");
+            }
 
-            foreach (var package in packages)
+            var sprints = package.Versions.GroupBy(x => x.GetSprint());
+            foreach (var sprint in sprints)
             {
-                responseBody = await (await client.GetAsync(package.Url + "/versions?api-version=7.0&isDeleted=false")).Content.ReadAsStringAsync();
-                package.Versions = JsonSerializer.Deserialize<PackageVersionsResponse>(responseBody, jsonOptions).Value;
+                var versions = sprint.Where(x => !x.IsLatest && !x.IsDeleted && x.IsListed && package.VersionMetrics.Any(y => y.PackageVersionId == x.Id))
+                    .OrderByDescending(x => x.Version)
+                    .Skip(5)
+                    .ToList();
 
-                responseBody = await (await client.PostAsJsonAsync(package.Url + "/versionmetricsbatch?api-version=7.0", new
-                {
-                    PackageVersionIds = package.Versions.Where(x => x.IsListed).Select(x => x.Id).ToArray()
-                })).Content.ReadAsStringAsync();
-                package.VersionMetrics = JsonSerializer.Deserialize<PackageVersionMetricsResponse>(responseBody, jsonOptions).Value;
+                Console.WriteLine($"Package: {package.Name} - Sprint: {sprint.Key} - {sprint.Count()} packages - Needs to delete: {versions.Count} packages");
 
-                var deletedPackageVersions = package.Versions.Where(x => !x.IsLatest && !x.IsDeleted && x.IsListed && !package.VersionMetrics.Any(y => y.PackageVersionId == x.Id)).ToArray();
-                deletedPackageVersions = deletedPackageVersions.Where(x => x.PublishDate <= DateTime.Now.AddDays(-14)).ToArray();
-
-                Console.WriteLine($"Package: {package.Name} - {package.Versions.Count} packages - Needs to delete: {deletedPackageVersions.Length} packages");
-
-                foreach (var deletedPackageVersion in deletedPackageVersions)
+                foreach (var deletedPackageVersion in versions)
                 {
                     var packageUrl = feedInfo.NuGetUrl + $"/packages/{package.Name}/versions/{deletedPackageVersion.Version}?api-version=7.0";
 
@@ -57,8 +76,9 @@ namespace AzureDevOps.NuGetFeedManager
                 }
             }
 
-            Console.WriteLine("Press any key to continue ...");
-            Console.ReadLine();
         }
+
+        Console.WriteLine("Press any key to continue ...");
+        Console.ReadLine();
     }
 }
